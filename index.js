@@ -1,12 +1,68 @@
-import express from 'express';
+import express from "express";
+import { MongoClient } from "mongodb";
+import cors from "cors";
+import "dotenv/config";
 
 const app = express();
-const Port = 8000;
+const PORT = 8000;
 
-// http://localhost:8000
-app.get('/', (req,res) => {
-    res.send({message: 'server is working'})
-})
-app.listen(Port, () =>{
-    console.log(`server is running at ${Port}`);
-})
+// Middleware
+app.use(cors({
+  origin: "http://localhost:3000",
+}));
+app.use(express.json());
+
+// MongoDB connection
+const client = new MongoClient(process.env.MONGODB_URI);
+
+let eventsCollection;
+
+async function connectToMongoDB() {
+  try {
+    await client.connect();
+
+    const db = client.db("better-together");
+    eventsCollection = db.collection("events");
+
+    console.log("Successfully connected to MongoDB!");
+  } catch (error) {
+    console.error("MongoDB connection failed:", error);
+    process.exit(1);
+  }
+}
+
+// Create Event API
+app.post("/create-event", async (req, res) => {
+  try {
+    const eventData = req.body;
+
+    const result = await eventsCollection.insertOne(eventData);
+
+    res.status(201).json({
+      message: "Event created successfully!",
+      insertedId: result.insertedId,
+    });
+  } catch (error) {
+    console.error("Event creation failed:", error);
+
+    res.status(500).json({
+      message: "Failed to create event",
+    });
+  }
+});
+
+// Test API
+app.get("/", (req, res) => {
+  res.send({ message: "Server is working!" });
+});
+
+// Start server after MongoDB connects
+async function startServer() {
+  await connectToMongoDB();
+
+  app.listen(PORT, () => {
+    console.log(`Server is running at http://localhost:${PORT}`);
+  });
+}
+
+startServer();
