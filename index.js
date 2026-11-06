@@ -5,11 +5,10 @@ import "dotenv/config";
 
 
 const app = express();
-const PORT = 8000;
 
 // Middleware
 app.use(cors({
-    origin: "http://localhost:3000",
+    origin: (process.env.CLIENT_URL),
 }));
 app.use(express.json());
 
@@ -35,6 +34,7 @@ export async function connectToMongoDB() {
 // Create Event API
 app.post("/create-event", async (req, res) => {
     try {
+        const collection = await connectToMongoDB();
         const eventData = req.body;
 
         const result = await eventsCollection.insertOne(eventData);
@@ -58,6 +58,7 @@ app.get('/', (req,res) =>{
 })
 // get events api
 app.get("/events", async (req, res) => {
+    const collection = await connectToMongoDB();
     const events = await eventsCollection
         .find({})
         .sort({ eventDate: 1 })
@@ -71,14 +72,8 @@ app.get('/events/:id', async(req,res) =>{
 
     res.send(result)
 })
+    // app.listen(PORT, () => {
+    //     console.log(`Server is running at ${PORT}`);
+    // });
 
-// Start server after MongoDB connects
-async function startServer() {
-    await connectToMongoDB();
-
-    app.listen(PORT, () => {
-        console.log(`Server is running at http://localhost:${PORT}`);
-    });
-}
-
-startServer();
+export default app
