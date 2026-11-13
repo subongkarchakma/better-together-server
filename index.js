@@ -68,23 +68,79 @@ app.post("/create-event", async (req, res) => {
     });
 });
 
-    
-// Get All Events API
+
+// Get logged-in user's events
+app.get("/my-events", async (req, res) => {
+    // Verify private API secret
+    const secret = process.env.EVENT_API_SECRET;
+    const requestSecret = req.headers["x-internal-api-secret"];
+
+    if (!secret) {
+        return res.status(500).json({
+            message: "Server authentication is not configured.",
+        });
+    }
+
+    if (
+        typeof requestSecret !== "string" ||
+        Buffer.byteLength(secret) !== Buffer.byteLength(requestSecret) ||
+        !timingSafeEqual(Buffer.from(secret), Buffer.from(requestSecret))
+    ) {
+        return res.status(403).json({
+            message: "Unauthorized request.",
+        });
+    }
+
+    // Get creator email from authenticated Next.js server
+    const creatorEmail = req.headers["x-user-email"];
+
+    if (typeof creatorEmail !== "string" || !creatorEmail) {
+        return res.status(400).json({
+            message: "Creator email is required.",
+        });
+    }
+
+    // Fetch only events created by this user
+    const collection = await userEventsCollection;
+
+    const events = await collection
+        .find({ creatorEmail })
+        .sort({ eventDate: 1 })
+        .toArray();
+
+    res.status(200).json(events);
+});
+
+
+
+// Get All Upcoming Events API
 app.get("/events", async (req, res) => {
     const [existingEvents, userEvents] = await Promise.all([
         eventsCollection,
         userEventsCollection,
     ]);
 
-    // Fetch events from both collections
-    const [events, createdEvents] = await Promise.all([
-        existingEvents.find({}, {
-            projection: { creatorEmail: 0 },
-        }).toArray(),
+    // Get today's date in Bangladesh timezone
+    const today = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Dhaka",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+    }).format(new Date());
 
-        userEvents.find({}, {
-            projection: { creatorEmail: 0 },
-        }).toArray(),
+    console.log("Today's date:", today);
+
+    // Fetch only upcoming events from both collections
+    const [events, createdEvents] = await Promise.all([
+        existingEvents.find(
+            { eventDate: { $gte: today } },
+            { projection: { creatorEmail: 0 } }
+        ).toArray(),
+
+        userEvents.find(
+            { eventDate: { $gte: today } },
+            { projection: { creatorEmail: 0 } }
+        ).toArray(),
     ]);
 
     // Combine and sort events by date
@@ -98,32 +154,20 @@ app.get("/events", async (req, res) => {
             source: "userEvents",
         })),
     ].sort((a, b) =>
-        String(a.eventDate ?? "").localeCompare(
-            String(b.eventDate ?? "")
-        )
+        String(a.eventDate).localeCompare(String(b.eventDate))
     );
 
-    res.send(allEvents);
-});
+    console.log("Upcoming events:", allEvents.length);
 
+    res.set("Cache-Control", "no-store");
+    res.status(200).send(allEvents);
+});
 
 
 
 // Test API
 app.get("/", (req, res) => {
     res.send("events is coming soon");
-});
-
-// Get all events API
-app.get("/events", async (req, res) => {
-    const collection = await eventsCollection;
-
-    const events = await collection
-        .find({})
-        .sort({ eventDate: 1 })
-        .toArray();
-
-    res.send(events);
 });
 
 // Get event details API
