@@ -112,6 +112,152 @@ app.get("/my-events", async (req, res) => {
 });
 
 
+// Delete an event created by the logged-in user
+app.delete("/my-events/:id", async (req, res) => {
+    const { id } = req.params;
+
+    // Verify private API secret
+    const secret = process.env.EVENT_API_SECRET;
+    const requestSecret = req.headers["x-internal-api-secret"];
+
+    if (!secret) {
+        return res.status(500).json({
+            message: "Server authentication is not configured.",
+        });
+    }
+
+    if (
+        typeof requestSecret !== "string" ||
+        Buffer.byteLength(secret) !== Buffer.byteLength(requestSecret) ||
+        !timingSafeEqual(Buffer.from(secret), Buffer.from(requestSecret))
+    ) {
+        return res.status(403).json({
+            message: "Unauthorized request.",
+        });
+    }
+
+    // Validate event ID
+    if (!ObjectId.isValid(id)) {
+        return res.status(400).json({
+            message: "Invalid event ID.",
+        });
+    }
+
+    // Get authenticated user's email from Next.js
+    const creatorEmail = req.headers["x-user-email"];
+
+    if (typeof creatorEmail !== "string" || !creatorEmail) {
+        return res.status(401).json({
+            message: "Unauthorized user.",
+        });
+    }
+
+    // Delete only the event owned by this user
+    const collection = await userEventsCollection;
+
+    const result = await collection.deleteOne({
+        _id: new ObjectId(id),
+        creatorEmail,
+    });
+
+    if (result.deletedCount === 0) {
+        return res.status(404).json({
+            message: "Event not found or you don't have permission to delete it.",
+        });
+    }
+
+    res.status(200).json({
+        message: "Event deleted successfully!",
+    });
+});
+
+
+// Update an event created by the logged-in user
+app.patch("/my-events/:id", async (req, res) => {
+    const { id } = req.params;
+
+    // Verify private API secret
+    const secret = process.env.EVENT_API_SECRET;
+    const requestSecret = req.headers["x-internal-api-secret"];
+
+    if (!secret) {
+        return res.status(500).json({
+            message: "Server authentication is not configured.",
+        });
+    }
+
+    if (
+        typeof requestSecret !== "string" ||
+        Buffer.byteLength(secret) !== Buffer.byteLength(requestSecret) ||
+        !timingSafeEqual(Buffer.from(secret), Buffer.from(requestSecret))
+    ) {
+        return res.status(403).json({
+            message: "Unauthorized request.",
+        });
+    }
+
+    // Validate event ID
+    if (!ObjectId.isValid(id)) {
+        return res.status(400).json({
+            message: "Invalid event ID.",
+        });
+    }
+
+    // Get authenticated user's email
+    const creatorEmail = req.headers["x-user-email"];
+
+    if (typeof creatorEmail !== "string" || !creatorEmail) {
+        return res.status(401).json({
+            message: "Unauthorized user.",
+        });
+    }
+
+    // Allow only editable fields
+    const allowedFields = [
+        "title",
+        "description",
+        "eventType",
+        "thumbnail",
+        "location",
+        "eventDate",
+    ];
+
+    const updates = Object.fromEntries(
+        Object.entries(req.body).filter(([key]) =>
+            allowedFields.includes(key)
+        )
+    );
+
+    if (Object.keys(updates).length === 0) {
+        return res.status(400).json({
+            message: "No valid fields provided.",
+        });
+    }
+
+    // Update only the event owned by this user
+    const collection = await userEventsCollection;
+
+    const result = await collection.updateOne(
+        {
+            _id: new ObjectId(id),
+            creatorEmail,
+        },
+        {
+            $set: updates,
+        }
+    );
+
+    if (result.matchedCount === 0) {
+        return res.status(404).json({
+            message: "Event not found or you don't have permission to edit it.",
+        });
+    }
+
+    res.status(200).json({
+        message: "Event updated successfully!",
+    });
+});
+
 
 // Get All Upcoming Events API
 app.get("/events", async (req, res) => {
@@ -170,17 +316,45 @@ app.get("/", (req, res) => {
     res.send("events is coming soon");
 });
 
-// Get event details API
+
+// Get event details from both collections
 app.get("/events/:id", async (req, res) => {
-    const collection = await eventsCollection;
     const { id } = req.params;
 
-    const result = await collection.findOne({
+    // Validate MongoDB ObjectId
+    if (!ObjectId.isValid(id)) {
+        return res.status(400).json({
+            message: "Invalid event ID",
+        });
+    }
+
+    const [existingEvents, userEvents] = await Promise.all([
+        eventsCollection,
+        userEventsCollection,
+    ]);
+
+    // Search in the original events collection first
+    let result = await existingEvents.findOne({
         _id: new ObjectId(id),
     });
 
-    res.send(result);
+    // If not found, search in userEvents
+    if (!result) {
+        result = await userEvents.findOne({
+            _id: new ObjectId(id),
+        });
+    }
+
+    // Return 404 if event doesn't exist
+    if (!result) {
+        return res.status(404).json({
+            message: "Event not found",
+        });
+    }
+
+    res.status(200).json(result);
 });
+
 
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
